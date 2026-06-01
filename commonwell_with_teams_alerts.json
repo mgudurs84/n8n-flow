@@ -1,0 +1,166 @@
+{
+  "name": "CommonWell Transactions + Error Alerts (Teams)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 30 }
+          ]
+        }
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000001",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-700, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "asg-session",
+              "name": "sessionJson",
+              "type": "string",
+              "value": "PASTE_THE_CONTENTS_OF_session.json_HERE"
+            },
+            {
+              "id": "asg-webhook",
+              "name": "teamsWebhookUrl",
+              "type": "string",
+              "value": "PASTE_YOUR_TEAMS_WEBHOOK_URL_HERE"
+            },
+            {
+              "id": "asg-window",
+              "name": "windowMinutes",
+              "type": "number",
+              "value": 30
+            },
+            {
+              "id": "asg-status",
+              "name": "status",
+              "type": "string",
+              "value": "All"
+            },
+            {
+              "id": "asg-tz",
+              "name": "portalTimeZone",
+              "type": "string",
+              "value": "America/New_York"
+            },
+            {
+              "id": "asg-pagesize",
+              "name": "pageSize",
+              "type": "number",
+              "value": 100
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000002",
+      "name": "Session + Filters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-480, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch ALL transactions for the last N minutes by paging until we have\n// everything the portal reports in 'Total'. Window computed in the portal's\n// timezone (US Eastern). Uses this.helpers.httpRequest to avoid the HTTP\n// Request node's TLSSocket/gzip bug in n8n 2.x.\n\nconst input = $input.first().json;\n\nlet session;\ntry {\n  session = typeof input.sessionJson === 'string' ? JSON.parse(input.sessionJson) : input.sessionJson;\n} catch (e) {\n  throw new Error('sessionJson is not valid JSON. Paste the full contents of session.json.');\n}\nif (!session.cookies || !session.token) {\n  throw new Error('session.json missing cookies or token. Re-run login.');\n}\nconst cookie = session.cookies.map(c => `${c.name}=${c.value}`).join('; ');\nconst token = session.token;\nconst base = (session.portalUrl || 'https://integration.commonwellalliance.lkopera.com/').replace(/\\/$/, '');\nconst url = base + '/TransactionLogs/BindTransactionLogs';\n\nconst windowMinutes = input.windowMinutes || 30;\nconst pageSize = input.pageSize || 100;\nconst status = input.status || 'All';\nconst portalTz = input.portalTimeZone || 'America/New_York';\n\nfunction fmtInTz(d, tz) {\n  const parts = new Intl.DateTimeFormat('en-US', {\n    timeZone: tz,\n    year: 'numeric', month: 'numeric', day: 'numeric',\n    hour: 'numeric', minute: '2-digit', second: '2-digit',\n    hour12: true\n  }).formatToParts(d);\n  const p = {};\n  for (const part of parts) p[part.type] = part.value;\n  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second} ${p.dayPeriod}`;\n}\nconst now = new Date();\nconst from = new Date(now.getTime() - windowMinutes * 60000);\nconst fromDate = fmtInTz(from, portalTz);\nconst toDate = fmtInTz(now, portalTz);\n\nconst enc = encodeURIComponent;\nfunction buildBody(page) {\n  const fields = {\n    sort: 'transactionId-asc', page: String(page), pageSize: String(pageSize),\n    group: '', filter: '', Status: status, FromDate: fromDate, ToDate: toDate,\n    organizationId: '', MemberId: '', TransactionType: '', TransactionId: '',\n    before: '', after: '', __RequestVerificationToken: token\n  };\n  return Object.keys(fields).map(k => `${enc(k)}=${enc(fields[k])}`).join('&');\n}\n\nasync function fetchPage(page) {\n  const respBody = await this.helpers.httpRequest({\n    method: 'POST', url,\n    headers: {\n      'Cookie': cookie,\n      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',\n      'X-Requested-With': 'XMLHttpRequest', 'Accept': '*/*',\n      'Origin': base, 'Referer': base + '/TransactionLogs/index'\n    },\n    body: buildBody(page), json: false\n  });\n  let resp = respBody;\n  if (typeof resp === 'string') {\n    const t = resp.trim();\n    if (t.startsWith('<')) throw new Error('Got HTML instead of JSON — session expired. Re-run login.');\n    resp = JSON.parse(t);\n  }\n  return resp;\n}\n\nlet allRows = [];\nlet page = 1;\nconst first = await fetchPage.call(this, page);\nconst total = (first && (first.Total || first.total)) || 0;\nlet rows = (first && (first.Data || first.data || first.rows)) || [];\nallRows = allRows.concat(rows);\n\nconst maxPages = 200;\nwhile (allRows.length < total && page < maxPages) {\n  page++;\n  const next = await fetchPage.call(this, page);\n  const nextRows = (next && (next.Data || next.data || next.rows)) || [];\n  if (nextRows.length === 0) break;\n  allRows = allRows.concat(nextRows);\n}\n\nreturn [{ json: { rows: allRows, count: allRows.length, total, fromDate, toDate,\n  webhookUrl: input.teamsWebhookUrl, portalTz } }];"
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000003",
+      "name": "Fetch All Transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-260, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Inspect every transaction for client errors (any status that isn't\n// 'Successful') and build a report. Always passes one item downstream with\n// hasErrors + a ready-to-send Teams MessageCard.\n\nconst data = $input.first().json;\nconst rows = data.rows || [];\n\n// a transaction is an error if status isn't 'Successful' (case-insensitive)\nconst isError = (r) => {\n  const s = (r.status || '').toString().toLowerCase();\n  return s !== 'successful' && s !== 'success' && s !== '';\n};\n\nconst errors = rows.filter(isError);\nconst hasErrors = errors.length > 0;\n\n// group error counts by transactionType for a compact summary\nconst byType = {};\nfor (const e of errors) {\n  const t = e.transactionType || 'Unknown';\n  byType[t] = (byType[t] || 0) + 1;\n}\nconst typeSummary = Object.keys(byType).map(t => `${t}: ${byType[t]}`).join(', ') || 'none';\n\n// build a list of up to 10 failed transaction ids for the card\nconst sampleLines = errors.slice(0, 10).map(e =>\n  `- ${e.transactionType || '?'} | ${e.status} | ${e.transactionId} | ${e.Timestamp || ''}`\n).join('\\n');\nconst more = errors.length > 10 ? `\\n…and ${errors.length - 10} more` : '';\n\n// Teams MessageCard (legacy Incoming Webhook format)\nconst card = {\n  '@type': 'MessageCard',\n  '@context': 'http://schema.org/extensions',\n  themeColor: hasErrors ? 'D70000' : '2EB67D',\n  summary: hasErrors ? `CommonWell: ${errors.length} failed transactions` : 'CommonWell: all clear',\n  title: hasErrors\n    ? `⚠️ CommonWell: ${errors.length} failed transaction(s)`\n    : '✅ CommonWell: no errors',\n  sections: [{\n    facts: [\n      { name: 'Window', value: `${data.fromDate} – ${data.toDate} (${data.portalTz})` },\n      { name: 'Total in window', value: String(data.count) },\n      { name: 'Failed', value: String(errors.length) },\n      { name: 'By type', value: typeSummary }\n    ],\n    text: hasErrors ? ('```\\n' + sampleLines + more + '\\n```') : ''\n  }]\n};\n\nreturn [{\n  json: {\n    hasErrors,\n    errorCount: errors.length,\n    totalCount: data.count,\n    window: `${data.fromDate} – ${data.toDate}`,\n    errors,\n    webhookUrl: data.webhookUrl,\n    teamsCard: card\n  }\n}];"
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000004",
+      "name": "Check For Errors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond-has-errors",
+              "leftValue": "={{ $json.hasErrors }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000005",
+      "name": "Any Errors?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [180, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.teamsCard) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000006",
+      "name": "Post To Teams",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 220]
+    },
+    {
+      "parameters": {
+        "content": "## What this does\n\nEvery 30 min: pulls all transactions for the last 30 min (Eastern,\npaged), checks each for a non-'Successful' status, and **posts to\nMicrosoft Teams only when there are errors**.\n\n## Setup (paste 2 values into Session + Filters)\n1. **sessionJson** — full contents of session.json (from node login.js)\n2. **teamsWebhookUrl** — your Teams Incoming Webhook URL\n\n## To notify on EVERY run (even all-clear)\nDelete the **Any Errors?** IF node and connect Check For Errors\nstraight to Post To Teams. The card already shows a green ✅ when\nthere are no errors.\n\n## Error definition\nAny transaction whose status isn't 'Successful'. Adjust the isError()\ncheck in **Check For Errors** if the portal uses other 'ok' statuses.\n\n## Daily\nsession.json expires (~a day). When runs fail with 'session expired',\nre-run node login.js and paste the fresh session.json.",
+        "height": 460,
+        "width": 420
+      },
+      "id": "b7b7f001-0001-4001-8001-000000000007",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-700, -200]
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [[{ "node": "Session + Filters", "type": "main", "index": 0 }]]
+    },
+    "Session + Filters": {
+      "main": [[{ "node": "Fetch All Transactions", "type": "main", "index": 0 }]]
+    },
+    "Fetch All Transactions": {
+      "main": [[{ "node": "Check For Errors", "type": "main", "index": 0 }]]
+    },
+    "Check For Errors": {
+      "main": [[{ "node": "Any Errors?", "type": "main", "index": 0 }]]
+    },
+    "Any Errors?": {
+      "main": [
+        [{ "node": "Post To Teams", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
