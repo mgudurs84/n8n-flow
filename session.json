@@ -1,0 +1,47 @@
+{
+  "savedAt": "2026-06-01T21:20:18.055Z",
+  "portalUrl": "https://integration.commonwellalliance.lkopera.com/",
+  "token": "CfDJ8KSjhSsOkCFPn_5Q5AIrZfsETCiyI080ga0sJLKqThAOfKm7qp4il-PkwatC5an--a7O-IpjWtCvBldjMjqrwXSH3bYvVy6C1NW-xyQIMsAL5N68qA-ECNN8NVQcjc00H32cxN3FuYzj1xxP7bzU5X9S5p0xn5w_0iRgauO7JoDUynaxhT49HrZAV6tbTgq8yA",
+  "cookies": [
+    {
+      "name": ".AspNetCore.Antiforgery.EQ7huARy6DA",
+      "value": "CfDJ8KSjhSsOkCFPn_5Q5AIrZfu-V3DZnLbG17DtRHfXaNm27FxFJZLzpUExBzCMgHCy_Y-ChaQUXn4UUhvWi3m1LuiNrARa3xyMXhlTwPgMzEmcpTK8imLVQKDfmXQA5VIDREF-zIrMPTSBP-InE3Orrqo",
+      "domain": "integration.commonwellalliance.lkopera.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Strict"
+    },
+    {
+      "name": ".CommonWell.Session",
+      "value": "CfDJ8KSjhSsOkCFPn%2F5Q5AIrZfs8EeQA1OfpUWNtwhYwofEWuZH%2FVmGPUX%2BHvIGhUNTswGGXbViomdGI3SfeRB6rexVwo3T17ym%2B688v2Vvv4OdaqGmKrYNdZXF8qF6JH2ILgK0b0XE%2FMdL4cUziT4MMX%2BY%2FsZPtbZrbI%2FFPvxCstqCC",
+      "domain": "integration.commonwellalliance.lkopera.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": ".AspNetCore.Cookies",
+      "value": "CfDJ8KSjhSsOkCFPn_5Q5AIrZfuzDx-gWH8jTS5lgSjLLffZ7FGxZbVSniYw1ue22VoVKtF6iJAks17e4WWgQ95AdPCJ30J5nmbHClX3uT7lZwOd9sHdeh908J9vTtBTfmT0g3TNMWLgioLIUrQmmqud4_yzbkCP6wvq2Nx3MdyljZzszUlghVJuujEWrmluiwFTgqpIPCEhwdMedGgwFhKG5O_6jz3zef-Wt0rBP6eLH8FPRdutA1VatLNPKWnUUtg8mHtbW_Svsm_BYkLluhU8ddW_8xZMtlc5OAbmok9Ihf6bBtmxPzIYcEHMHPboJayL8dvRkGiJC13HNm6RjIMn_9w",
+      "domain": "integration.commonwellalliance.lkopera.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": ".AspNetCore.Mvc.CookieTempDataProvider",
+      "value": "CfDJ8KSjhSsOkCFPn_5Q5AIrZfuZUtZX7Txo6w4_ZQ4o5fGlPdaDQuRZdhfMccHpVgTkNSUn5F_ODP4O0P9CE5qmK2I70rbQjoD-ofQStCU0F4RpTADLBRa9KRzmN-V0WwYhZb46ayVDy7Jo76CUNVylFr06BME4gw76TGbM0-o95-RLHu04UE8ECzHfTis7I83YqJKxJq6jlfdUAnVNVQeHA20nW4OsnvT78bHnBGK0wYi6IQDGWMHtH9TCeQJrJ0D-9vIvJUM6I14orHjIDc756pNkuwySv0nQr5RsRTEdL3Hi_GfqviqUEvBEWys1iZNikFjoO1lpDvNNnq3Q-8Z0XqTZfHclT7kX_MhiGGFuAcvXbtHLKoj_TkMUzdOOZYhMyjSlb86K_RDEbhn9CF_fNp4ya0MXSWNvHwH1_2yiYGEhlN6EtJGo8KxG-XSaGrMJHOogY7HXbWItdGUQSGPTQ8dRT9-vAAO7Wckib4HUMxCmyxw3hW7OH84AZN5uToEHFbWOQJTFIUOIcgS-xax6jc7xRLVpLnJjNdas7fHQ_t7kMHlPOB2WtzLM78WplM-1OyqYaAA_JQGU75gbfShJRZ9dLdCbyymUmJAoegUZBuOsiCPr1j4LXnLh6AFUemFs_FE2Klz2NPyXE4-9Khf5g0-jFzmRH208LTYnKNoPWu9KmmmWRuancCFgrGHrHsQ9Tb-KiGgRTDiYEhcz1GcCAE7-yGzgNga80BFZS4dDnx9pY5CZ-tgaUC8zcfSJfpFafgoD9rGTtYVw-Pl66MGHAXhUV7O8LfeIPdhSlpRCaI6WFctn_3BGbR7fxBC8SHDICJmPypVGag0J2anC55RGJM0E6Gxh_xWSeP4iVh4Euy3imB692uo1ORUYiUhSImI7vUKoLWa_2xoT_RhuDaG72NETKID5tlT3HHmNXG9GP3xGNcfAcXlJTHPqvGIy24HHELHrZDm__js6PR7v2xdsVKUV_aByD1pnmtiVI9hDGhof4tL-S1K8_i7pJ1wNzqNb_hS72-lm0YxUGEfKBJmkJyMmkBfSiANl7Yw43naAr2O8Uow-Vd-KKMyTs6GT5LMubjP26pKGI4gjmMxtH3WVzQ2ALVIh16CpQdXA-gN5lFoQzNIwnKVGo73hU31eEhb-DwXmZ0efHpSO70HwOu-ZkS8dRuJ2jScMoZGfuvQ2WsB59-bZMHwN-gN77oM9hnDkGAwtUfU84A_zFQjE3_4RCXxY62irIpjP6_-84ndfxeO9D5ObH_NN-uDoV0FcWOVIQxaW-2dbI1VMOIOkVofVRi0SM0OTWYMJ6cwM2ZJdu1OoWsU-rAL2-7SsJlAiLZ2vbA7w_IRMPWJX0AoWkwsBMwQh-TjBhdmGDmWh5T_ZhjmTmUNYs56V99fEYak_4MOR8gaj1UDua3F2qQW0GzWEWWNs-aaXunDC7HPAeJqSuHJxobzuZbRii5RZ0yBOb7uiFw",
+      "domain": "integration.commonwellalliance.lkopera.com",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ]
+}

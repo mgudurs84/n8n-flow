@@ -1,0 +1,109 @@
+{
+  "name": "CommonWell Transactions (Code HTTP)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f5a5f001-0001-4001-8001-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-560, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "asg-session",
+              "name": "sessionJson",
+              "type": "string",
+              "value": "PASTE_THE_CONTENTS_OF_session.json_HERE"
+            },
+            {
+              "id": "asg-from",
+              "name": "fromDate",
+              "type": "string",
+              "value": "={{ $today.toFormat('M/d/yyyy') }} 12:00:00 AM"
+            },
+            {
+              "id": "asg-to",
+              "name": "toDate",
+              "type": "string",
+              "value": "={{ $today.plus({ days: 1 }).toFormat('M/d/yyyy') }} 12:00:00 AM"
+            },
+            {
+              "id": "asg-status",
+              "name": "status",
+              "type": "string",
+              "value": "All"
+            },
+            {
+              "id": "asg-page",
+              "name": "page",
+              "type": "number",
+              "value": 1
+            },
+            {
+              "id": "asg-pagesize",
+              "name": "pageSize",
+              "type": "number",
+              "value": 20
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f5a5f001-0001-4001-8001-000000000002",
+      "name": "Session + Filters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-340, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Does the whole call from inside a Code node using this.helpers.httpRequest,\n// which returns a clean decompressed body (avoids the HttpRequestV3 'toText'\n// circular-socket bug in some n8n versions).\n\nconst input = $input.first().json;\n\n// --- parse session.json ---\nlet session;\ntry {\n  session = typeof input.sessionJson === 'string' ? JSON.parse(input.sessionJson) : input.sessionJson;\n} catch (e) {\n  throw new Error('sessionJson is not valid JSON. Paste the full contents of session.json.');\n}\nif (!session.cookies || !session.token) {\n  throw new Error('session.json missing cookies or token. Re-run login.');\n}\n\nconst cookie = session.cookies.map(c => `${c.name}=${c.value}`).join('; ');\nconst token = session.token;\nconst base = session.portalUrl || 'https://integration.commonwellalliance.lkopera.com/';\nconst url = base.replace(/\\/$/, '') + '/TransactionLogs/BindTransactionLogs';\n\n// --- build form body ---\nconst enc = encodeURIComponent;\nconst fields = {\n  sort: 'transactionId-asc',\n  page: String(input.page || 1),\n  pageSize: String(input.pageSize || 20),\n  group: '',\n  filter: '',\n  Status: input.status || 'All',\n  FromDate: input.fromDate || '',\n  ToDate: input.toDate || '',\n  organizationId: '',\n  MemberId: '',\n  TransactionType: '',\n  TransactionId: '',\n  before: '',\n  after: '',\n  __RequestVerificationToken: token\n};\nconst body = Object.keys(fields).map(k => `${enc(k)}=${enc(fields[k])}`).join('&');\n\n// --- make the request ---\nlet responseBody;\ntry {\n  responseBody = await this.helpers.httpRequest({\n    method: 'POST',\n    url,\n    headers: {\n      'Cookie': cookie,\n      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',\n      'X-Requested-With': 'XMLHttpRequest',\n      'Accept': '*/*',\n      'Origin': base.replace(/\\/$/, ''),\n      'Referer': base.replace(/\\/$/, '') + '/TransactionLogs/index'\n    },\n    body,\n    json: false\n  });\n} catch (err) {\n  throw new Error('HTTP request failed: ' + (err.message || err));\n}\n\n// responseBody is a string (or already-parsed object)\nlet resp = responseBody;\nif (typeof resp === 'string') {\n  let text = resp.trim();\n  if (text.startsWith('<')) {\n    throw new Error('Got HTML instead of JSON — session expired. Re-run login and paste a fresh session.json.');\n  }\n  resp = JSON.parse(text);\n}\n\n// extract rows\nlet rows;\nif (Array.isArray(resp)) rows = resp;\nelse if (resp && resp.Data) rows = resp.Data;\nelse if (resp && resp.data) rows = resp.data;\nelse if (resp && resp.rows) rows = resp.rows;\nelse rows = [];\n\nconst total = (resp && (resp.Total || resp.total)) || rows.length;\nreturn [{ json: { rows, count: rows.length, total } }];"
+      },
+      "id": "f5a5f001-0001-4001-8001-000000000003",
+      "name": "Fetch Transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-120, 320]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rows",
+        "options": {}
+      },
+      "id": "f5a5f001-0001-4001-8001-000000000004",
+      "name": "Split Transactions",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [100, 320]
+    },
+    {
+      "parameters": {
+        "content": "## Daily use\n\n1. Run **node login.js** on a machine with a browser. Log in + OTP.\n   It saves session.json.\n2. Open **Session + Filters** node, paste the FULL contents of\n   session.json into the sessionJson field.\n3. **Execute Workflow**.\n\nThe **Fetch Transactions** Code node does the portal call directly via\nthis.helpers.httpRequest — this avoids the HTTP Request node's\n'Converting circular structure / TLSSocket' bug in n8n 2.x and handles\ngzip cleanly.\n\nIf you get 'HTML instead of JSON' -> session expired, re-run login.",
+        "height": 320,
+        "width": 400
+      },
+      "id": "f5a5f001-0001-4001-8001-000000000005",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-560, -120]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Session + Filters", "type": "main", "index": 0 }]]
+    },
+    "Session + Filters": {
+      "main": [[{ "node": "Fetch Transactions", "type": "main", "index": 0 }]]
+    },
+    "Fetch Transactions": {
+      "main": [[{ "node": "Split Transactions", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
