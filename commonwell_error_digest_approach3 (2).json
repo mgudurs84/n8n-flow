@@ -1,0 +1,109 @@
+{
+  "name": "CommonWell Error Digest (Approach 3, Teams)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [ { "field": "minutes", "minutesInterval": 30 } ] }
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000001",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-700, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "asg-session", "name": "sessionJson", "type": "string", "value": "PASTE_THE_CONTENTS_OF_session.json_HERE" },
+            { "id": "asg-webhook", "name": "teamsWebhookUrl", "type": "string", "value": "PASTE_YOUR_TEAMS_WEBHOOK_URL_HERE" },
+            { "id": "asg-window", "name": "windowMinutes", "type": "number", "value": 30 },
+            { "id": "asg-tz", "name": "portalTimeZone", "type": "string", "value": "America/New_York" },
+            { "id": "asg-pagesize", "name": "pageSize", "type": "number", "value": 100 }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000002",
+      "name": "Session + Filters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-480, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Step 1: fetch all transactions in the window (paged), find failures,\n// group them, fetch BindTransactionLogsHistory for ONE representative per\n// group, extract the error line, and build a Teams digest. All in one Code\n// node using this.helpers.httpRequest (avoids the HTTP node gzip/socket bug).\n\nconst input = $input.first().json;\n\nlet session;\ntry {\n  session = typeof input.sessionJson === 'string' ? JSON.parse(input.sessionJson) : input.sessionJson;\n} catch (e) { throw new Error('sessionJson is not valid JSON.'); }\nif (!session.cookies || !session.token) throw new Error('session.json missing cookies or token. Re-run login.');\n\nconst cookie = session.cookies.map(c => `${c.name}=${c.value}`).join('; ');\nconst token = session.token;\nconst base = (session.portalUrl || 'https://integration.commonwellalliance.lkopera.com/').replace(/\\/$/, '');\nconst gridUrl = base + '/TransactionLogs/BindTransactionLogs';\nconst histUrl = base + '/TransactionLogs/BindTransactionLogsHistory';\n\nconst windowMinutes = input.windowMinutes || 30;\nconst pageSize = input.pageSize || 100;\nconst portalTz = input.portalTimeZone || 'America/New_York';\nconst enc = encodeURIComponent;\n\nfunction fmtInTz(d, tz) {\n  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true }).formatToParts(d);\n  const p = {}; for (const x of parts) p[x.type] = x.value;\n  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second} ${p.dayPeriod}`;\n}\nconst now = new Date();\nconst fromDate = fmtInTz(new Date(now.getTime() - windowMinutes*60000), portalTz);\nconst toDate = fmtInTz(now, portalTz);\n\nasync function post(url, bodyObj) {\n  const body = Object.keys(bodyObj).map(k => `${enc(k)}=${enc(bodyObj[k])}`).join('&');\n  const r = await this.helpers.httpRequest({\n    method:'POST', url,\n    headers:{ 'Cookie':cookie, 'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With':'XMLHttpRequest', 'Accept':'*/*', 'Origin':base, 'Referer':base+'/TransactionLogs/index' },\n    body, json:false\n  });\n  let resp = r;\n  if (typeof resp === 'string') {\n    const t = resp.trim();\n    if (t.startsWith('<')) throw new Error('Got HTML instead of JSON — session expired. Re-run login.');\n    resp = JSON.parse(t);\n  }\n  return resp;\n}\n\n// --- fetch all grid rows in window ---\nfunction gridBody(page) {\n  return { sort:'transactionId-asc', page:String(page), pageSize:String(pageSize), group:'', filter:'', Status:'All', FromDate:fromDate, ToDate:toDate, organizationId:'', MemberId:'', TransactionType:'', TransactionId:'', before:'', after:'', __RequestVerificationToken:token };\n}\nlet rows = [];\nlet page = 1;\nconst first = await post.call(this, gridUrl, gridBody(page));\nconst total = (first && (first.Total||first.total)) || 0;\nrows = rows.concat((first && (first.Data||first.data)) || []);\nwhile (rows.length < total && page < 200) {\n  page++;\n  const nx = await post.call(this, gridUrl, gridBody(page));\n  const nr = (nx && (nx.Data||nx.data)) || [];\n  if (!nr.length) break;\n  rows = rows.concat(nr);\n}\n\n// --- find failures (status not Successful) ---\nconst isError = r => { const s=(r.status||'').toLowerCase(); return s && s!=='successful' && s!=='success'; };\nconst failures = rows.filter(isError);\n\nif (failures.length === 0) {\n  return [{ json: { hasErrors:false, errorCount:0, totalCount:rows.length, window:`${fromDate} - ${toDate}`, webhookUrl:input.teamsWebhookUrl, groups:[] } }];\n}\n\n// --- group failures by transactionType + status ---\nconst groups = {};\nfor (const f of failures) {\n  const key = `${f.transactionType||'Unknown'} | ${f.status||'Error'}`;\n  if (!groups[key]) groups[key] = { type:f.transactionType||'Unknown', status:f.status||'Error', count:0, rep:f };\n  groups[key].count++;\n}\n\n// --- fetch history + detail view for ONE representative per group ---\nfunction histBody(txId) {\n  return { sort:'TimeStampDisplay-asc', page:'1', pageSize:'50', group:'', filter:'', TransactionId:txId, __RequestVerificationToken:token };\n}\n\n// the detail view endpoint uses multipart/form-data\nasync function fetchDetailHtml(txId) {\n  const boundary = '----n8nFormBoundary' + Math.random().toString(16).slice(2);\n  const body = `--${boundary}\\r\\nContent-Disposition: form-data; name=\"transactionId\"\\r\\n\\r\\n${txId}\\r\\n--${boundary}--\\r\\n`;\n  const r = await this.helpers.httpRequest({\n    method:'POST', url: base + '/TransactionLogs/LoadTransactionLogsDetailPartialView',\n    headers:{\n      'Cookie':cookie,\n      'Content-Type':`multipart/form-data; boundary=${boundary}`,\n      '__requestverificationtoken': token,\n      'X-Requested-With':'XMLHttpRequest', 'Accept':'*/*',\n      'Origin':base, 'Referer':base+'/TransactionLogs/index'\n    },\n    body, json:false\n  });\n  return typeof r === 'string' ? r : '';\n}\n\n// pull a labelled field out of the detail HTML by its label text\nfunction pickField(html, label) {\n  // matches: <label ...>LABEL:</label> <span ...> VALUE </span>\n  const re = new RegExp(label.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&') + '\\\\s*:?\\\\s*</label>\\\\s*<span[^>]*>([\\\\s\\\\S]*?)</span>', 'i');\n  const m = html.match(re);\n  if (!m) return null;\n  // strip nested tags/whitespace\n  return m[1].replace(/<[^>]+>/g,'').replace(/\\s+/g,' ').trim() || null;\n}\n\nconst groupList = [];\nfor (const key of Object.keys(groups)) {\n  const g = groups[key];\n  const txId = g.rep.transactionId;\n  let reason = 'No error detail found';\n  let detail = {};\n\n  // history error line\n  try {\n    const hist = await post.call(this, histUrl, histBody(txId));\n    const steps = (hist && (hist.Data||hist.data)) || [];\n    const errLine = steps.find(s => (s.logLevel||'').toLowerCase() === 'error');\n    if (errLine) reason = errLine.message;\n  } catch (e) { reason = 'Could not load history: ' + (e.message||e); }\n\n  // detail view rich fields\n  try {\n    const html = await fetchDetailHtml.call(this, txId);\n    detail = {\n      statusCode: pickField(html, 'Status Code'),\n      httpMethod: pickField(html, 'Http Method'),\n      path: pickField(html, 'Path'),\n      host: pickField(html, 'Host'),\n      txStatus: pickField(html, 'Transaction Status')\n    };\n  } catch (e) { /* detail optional */ }\n\n  if (reason.length > 500) reason = reason.slice(0,500) + '…';\n  groupList.push({ type:g.type, status:g.status, count:g.count, repId:txId, reason, detail });\n}\n\nreturn [{ json: { hasErrors:true, errorCount:failures.length, totalCount:rows.length, window:`${fromDate} - ${toDate}`, portalTz, webhookUrl:input.teamsWebhookUrl, groups:groupList } }];"
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000003",
+      "name": "Fetch + Diagnose",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-260, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the Teams MessageCard from the grouped diagnosis.\nconst d = $input.first().json;\n\nlet card;\nif (!d.hasErrors) {\n  card = {\n    '@type':'MessageCard', '@context':'http://schema.org/extensions',\n    themeColor:'2EB67D', summary:'CommonWell: all clear',\n    title:'✅ CommonWell: no errors',\n    sections:[{ facts:[\n      { name:'Window', value:`${d.window} (${d.portalTz||'ET'})` },\n      { name:'Total in window', value:String(d.totalCount) }\n    ]}]\n  };\n} else {\n  const sections = d.groups.map(g => {\n    const det = g.detail || {};\n    const lines = [];\n    if (det.statusCode) lines.push('HTTP ' + det.statusCode + (det.httpMethod ? ' (' + det.httpMethod + ')' : ''));\n    if (det.path) lines.push('Path: ' + det.path);\n    if (det.host) lines.push('Host: ' + det.host);\n    const ctx = lines.length ? lines.join('\\n') + '\\n\\n' : '';\n    return {\n      activityTitle: `**${g.type}** — ${g.status} (${g.count})`,\n      text: '```\\n' + ctx + g.reason + '\\n```\\nrep: ' + g.repId\n    };\n  });\n  card = {\n    '@type':'MessageCard', '@context':'http://schema.org/extensions',\n    themeColor:'D70000',\n    summary:`CommonWell: ${d.errorCount} failed transactions`,\n    title:`⚠️ CommonWell: ${d.errorCount} failed transaction(s) in ${d.groups.length} group(s)`,\n    sections:[{ facts:[\n      { name:'Window', value:`${d.window} (${d.portalTz||'ET'})` },\n      { name:'Total in window', value:String(d.totalCount) },\n      { name:'Failed', value:String(d.errorCount) }\n    ]}].concat(sections)\n  };\n}\n\nreturn [{ json: { hasErrors:d.hasErrors, webhookUrl:d.webhookUrl, teamsCard:card } }];"
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000004",
+      "name": "Build Teams Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            { "id": "c-err", "leftValue": "={{ $json.hasErrors }}", "rightValue": true, "operator": { "type": "boolean", "operation": "equals" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000005",
+      "name": "Any Errors?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [180, 320]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "Content-Type", "value": "application/json" } ] },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.teamsCard) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000006",
+      "name": "Post To Teams",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 220]
+    },
+    {
+      "parameters": {
+        "content": "## Approach 3 — grouped error digest\n\nEvery 30 min:\n1. Fetch all transactions in the last 30 min (Eastern, paged)\n2. Find failures (status != Successful)\n3. Group by transactionType + status\n4. Fetch **BindTransactionLogsHistory** for ONE rep per group\n5. Extract the `logLevel: Error` message (the real reason)\n6. Post a grouped digest to Teams — only when there are errors\n\nSo 18 identical GetBinary_R4 failures = 1 history fetch + 1 line,\nnot 18 of each.\n\n## Setup (paste 2 values into Session + Filters)\n- **sessionJson** — full contents of session.json\n- **teamsWebhookUrl** — your Teams webhook URL\n\n## Add Gemini later (optional)\nAfter Fetch + Diagnose, the `groups[].reason` holds the raw error\nmessage. To get a plain-English summary, add a node that sends each\nreason to Vertex AI / Gemini and replaces it before Build Teams Card.\n\n## Notify on every run (even all-clear)\nDelete the Any Errors? node and wire Build Teams Card -> Post To Teams.\nThe card shows green when clear.\n\n## Daily\nsession.json expires (~a day). Re-run node login.js and re-paste.",
+        "height": 500,
+        "width": 440
+      },
+      "id": "c8c8f001-0001-4001-8001-000000000007",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-700, -260]
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": { "main": [[{ "node": "Session + Filters", "type": "main", "index": 0 }]] },
+    "Session + Filters": { "main": [[{ "node": "Fetch + Diagnose", "type": "main", "index": 0 }]] },
+    "Fetch + Diagnose": { "main": [[{ "node": "Build Teams Card", "type": "main", "index": 0 }]] },
+    "Build Teams Card": { "main": [[{ "node": "Any Errors?", "type": "main", "index": 0 }]] },
+    "Any Errors?": { "main": [ [{ "node": "Post To Teams", "type": "main", "index": 0 }], [] ] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
