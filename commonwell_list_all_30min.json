@@ -1,0 +1,71 @@
+{
+  "name": "CommonWell - List All Transactions (Last 30 min)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "d9d9f001-0001-4001-8001-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-560, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "asg-session", "name": "sessionJson", "type": "string", "value": "PASTE_THE_CONTENTS_OF_session.json_HERE" },
+            { "id": "asg-window", "name": "windowMinutes", "type": "number", "value": 30 },
+            { "id": "asg-tz", "name": "portalTimeZone", "type": "string", "value": "America/New_York" },
+            { "id": "asg-pagesize", "name": "pageSize", "type": "number", "value": 100 }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d9d9f001-0001-4001-8001-000000000002",
+      "name": "Session + Filters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-340, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// List ALL transactions in the last N minutes (no filtering). Pages until\n// it has everything the portal reports in Total. Uses this.helpers.httpRequest\n// to avoid the HTTP node gzip/socket bug.\n\nconst input = $input.first().json;\n\nlet session;\ntry {\n  session = typeof input.sessionJson === 'string' ? JSON.parse(input.sessionJson) : input.sessionJson;\n} catch (e) { throw new Error('sessionJson is not valid JSON. Paste the full contents of session.json.'); }\nif (!session.cookies || !session.token) throw new Error('session.json missing cookies or token. Re-run login.');\n\nconst cookie = session.cookies.map(c => `${c.name}=${c.value}`).join('; ');\nconst token = session.token;\nconst base = (session.portalUrl || 'https://integration.commonwellalliance.lkopera.com/').replace(/\\/$/, '');\nconst url = base + '/TransactionLogs/BindTransactionLogs';\n\nconst windowMinutes = input.windowMinutes || 30;\nconst pageSize = input.pageSize || 100;\nconst portalTz = input.portalTimeZone || 'America/New_York';\nconst enc = encodeURIComponent;\n\nfunction fmtInTz(d, tz) {\n  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true }).formatToParts(d);\n  const p = {}; for (const x of parts) p[x.type] = x.value;\n  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second} ${p.dayPeriod}`;\n}\nconst now = new Date();\nconst fromDate = fmtInTz(new Date(now.getTime() - windowMinutes*60000), portalTz);\nconst toDate = fmtInTz(now, portalTz);\n\nfunction gridBody(page) {\n  const fields = { sort:'transactionId-asc', page:String(page), pageSize:String(pageSize), group:'', filter:'', Status:'All', FromDate:fromDate, ToDate:toDate, organizationId:'', MemberId:'', TransactionType:'', TransactionId:'', before:'', after:'', __RequestVerificationToken:token };\n  return Object.keys(fields).map(k => `${enc(k)}=${enc(fields[k])}`).join('&');\n}\n\nasync function fetchPage(page) {\n  const r = await this.helpers.httpRequest({\n    method:'POST', url,\n    headers:{ 'Cookie':cookie, 'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With':'XMLHttpRequest', 'Accept':'*/*', 'Origin':base, 'Referer':base+'/TransactionLogs/index' },\n    body: gridBody(page), json:false\n  });\n  let resp = r;\n  if (typeof resp === 'string') {\n    const t = resp.trim();\n    if (t.startsWith('<')) throw new Error('Got HTML instead of JSON — session expired. Re-run login.');\n    resp = JSON.parse(t);\n  }\n  return resp;\n}\n\nlet rows = [];\nlet page = 1;\nconst first = await fetchPage.call(this, page);\nconst total = (first && (first.Total||first.total)) || 0;\nrows = rows.concat((first && (first.Data||first.data)) || []);\nwhile (rows.length < total && page < 200) {\n  page++;\n  const nx = await fetchPage.call(this, page);\n  const nr = (nx && (nx.Data||nx.data)) || [];\n  if (!nr.length) break;\n  rows = rows.concat(nr);\n}\n\n// also report the distinct statuses present, handy for debugging error detection\nconst distinctStatuses = [...new Set(rows.map(r => r.status))];\n\nreturn [{ json: { rows, count: rows.length, total, fromDate, toDate, portalTz, distinctStatuses } }];"
+      },
+      "id": "d9d9f001-0001-4001-8001-000000000003",
+      "name": "Fetch All Transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-120, 320]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "rows",
+        "options": {}
+      },
+      "id": "d9d9f001-0001-4001-8001-000000000004",
+      "name": "Split Transactions",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [100, 320]
+    },
+    {
+      "parameters": {
+        "content": "## Lists all transactions, last 30 min\n\nNo filtering — every transaction in the window, one item per row\nafter Split Transactions.\n\n**Setup:** paste session.json contents into the sessionJson field,\nthen Execute Workflow.\n\n**Debugging tip:** the Fetch node's output includes\n`distinctStatuses` — the exact set of status values present\n(e.g. 'Successful', 'ServerError', 'ClientError'). Use these to\nfix the error-detection workflow's status filter if it's missing\nerrors.\n\n**No data?** Widen `windowMinutes` (e.g. 1440 = last 24h) to\nconfirm it works, then narrow back.",
+        "height": 320,
+        "width": 380
+      },
+      "id": "d9d9f001-0001-4001-8001-000000000005",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-560, -60]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": { "main": [[{ "node": "Session + Filters", "type": "main", "index": 0 }]] },
+    "Session + Filters": { "main": [[{ "node": "Fetch All Transactions", "type": "main", "index": 0 }]] },
+    "Fetch All Transactions": { "main": [[{ "node": "Split Transactions", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}
