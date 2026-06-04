@@ -1,0 +1,235 @@
+{
+  "name": "CommonWell - Transactions by Operation Type (Teams)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000001",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "asg-session",
+              "name": "sessionJson",
+              "type": "string",
+              "value": "PASTE_THE_CONTENTS_OF_session.json_HERE"
+            },
+            {
+              "id": "asg-webhook",
+              "name": "teamsWebhookUrl",
+              "type": "string",
+              "value": "PASTE_YOUR_TEAMS_WEBHOOK_URL_HERE"
+            },
+            {
+              "id": "asg-window",
+              "name": "windowMinutes",
+              "type": "number",
+              "value": 30
+            },
+            {
+              "id": "asg-tz",
+              "name": "portalTimeZone",
+              "type": "string",
+              "value": "America/New_York"
+            },
+            {
+              "id": "asg-pagesize",
+              "name": "pageSize",
+              "type": "number",
+              "value": 100
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000002",
+      "name": "Session + Filters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -480,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fetch all transactions in the last N minutes (paged), then group by\n// transactionType (the operation/method) with success vs error counts.\n\nconst input = $input.first().json;\n\nlet session;\ntry { session = typeof input.sessionJson === 'string' ? JSON.parse(input.sessionJson) : input.sessionJson; }\ncatch (e) { throw new Error('sessionJson is not valid JSON.'); }\nif (!session.cookies || !session.token) throw new Error('session.json missing cookies or token. Re-run login.');\n\nconst cookie = session.cookies.map(c => `${c.name}=${c.value}`).join('; ');\nconst token = session.token;\nconst base = (session.portalUrl || 'https://integration.commonwellalliance.lkopera.com/').replace(/\\/$/, '');\nconst url = base + '/TransactionLogs/BindTransactionLogs';\n\nconst windowMinutes = input.windowMinutes || 30;\nconst pageSize = input.pageSize || 100;\nconst portalTz = input.portalTimeZone || 'America/New_York';\nconst enc = encodeURIComponent;\n\nfunction fmtInTz(d, tz) {\n  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true }).formatToParts(d);\n  const p = {}; for (const x of parts) p[x.type] = x.value;\n  return `${p.month}/${p.day}/${p.year} ${p.hour}:${p.minute}:${p.second} ${p.dayPeriod}`;\n}\nconst now = new Date();\nconst fromDate = fmtInTz(new Date(now.getTime() - windowMinutes*60000), portalTz);\nconst toDate = fmtInTz(now, portalTz);\n\nfunction gridBody(page) {\n  const fields = { sort:'transactionId-asc', page:String(page), pageSize:String(pageSize), group:'', filter:'', Status:'All', FromDate:fromDate, ToDate:toDate, organizationId:'', MemberId:'', TransactionType:'', TransactionId:'', before:'', after:'', __RequestVerificationToken:token };\n  return Object.keys(fields).map(k => `${enc(k)}=${enc(fields[k])}`).join('&');\n}\n\nasync function fetchPage(page) {\n  const r = await this.helpers.httpRequest({\n    method:'POST', url,\n    headers:{ 'Cookie':cookie, 'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With':'XMLHttpRequest', 'Accept':'*/*', 'Origin':base, 'Referer':base+'/TransactionLogs/index' },\n    body: gridBody(page), json:false\n  });\n  let resp = r;\n  if (typeof resp === 'string') {\n    const t = resp.trim();\n    if (t.startsWith('<')) throw new Error('Got HTML instead of JSON \u2014 session expired. Re-run login.');\n    resp = JSON.parse(t);\n  }\n  return resp;\n}\n\nlet rows = [];\nlet page = 1;\nconst first = await fetchPage.call(this, page);\nconst total = (first && (first.Total||first.total)) || 0;\nrows = rows.concat((first && (first.Data||first.data)) || []);\nwhile (rows.length < total && page < 200) {\n  page++;\n  const nx = await fetchPage.call(this, page);\n  const nr = (nx && (nx.Data||nx.data)) || [];\n  if (!nr.length) break;\n  rows = rows.concat(nr);\n}\n\n// --- group by transactionType (operation/method) ---\nconst isError = s => { const x=(s||'').toLowerCase(); return x && x!=='successful' && x!=='success'; };\nconst groups = {};\nfor (const r of rows) {\n  const t = r.transactionType || 'Unknown';\n  if (!groups[t]) groups[t] = { type:t, total:0, success:0, errors:0, statuses:{} };\n  const g = groups[t];\n  g.total++;\n  if (isError(r.status)) g.errors++; else g.success++;\n  const st = r.status || 'Unknown';\n  g.statuses[st] = (g.statuses[st] || 0) + 1;\n}\n\n// sort groups by total desc\nconst groupList = Object.values(groups).sort((a,b) => b.total - a.total);\nconst totalErrors = groupList.reduce((s,g) => s + g.errors, 0);\n\nreturn [{ json: { count: rows.length, total, totalErrors, fromDate, toDate, portalTz, webhookUrl: input.teamsWebhookUrl, groups: groupList } }];"
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000003",
+      "name": "Fetch + Group",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -260,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build a Teams MessageCard listing transactions grouped by operation type,\n// showing whatever status values CommonWell reports (no error interpretation).\nconst d = $input.first().json;\n\n// one fact per operation type: \"GetBinary_R4: 18 (ServerError: 15, Successful: 3)\"\nconst groupFacts = (d.groups || []).map(g => {\n  const statusBits = Object.keys(g.statuses).map(s => `${s}: ${g.statuses[s]}`).join(', ');\n  return { name: g.type, value: `${g.total} \u2014 ${statusBits}` };\n});\n\nconst title = `CommonWell: ${d.count} transaction(s) in ${d.groups.length} operation type(s)`;\n\nconst card = {\n  '@type':'MessageCard', '@context':'http://schema.org/extensions',\n  themeColor:'4A6FA5',\n  summary: title,\n  title: title,\n  sections: [\n    { facts: [ { name:'Window', value:`${d.fromDate} - ${d.toDate} (${d.portalTz})` }, { name:'Total', value:String(d.count) } ] },\n    { activityTitle: '**By operation type**', facts: groupFacts }\n  ]\n};\n\nreturn [{ json: { webhookUrl: d.webhookUrl, teamsCard: card } }];"
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000004",
+      "name": "Build Teams Card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        120,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json.teamsCard) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000005",
+      "name": "Post To Teams",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        340,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Transactions grouped by operation type\n\nEvery 30 min: pulls all transactions in the last 30 min, groups\nthem by **transactionType** (the operation/method \u2014 GetBinary_R4,\nGetDocument_R4, PatientMatch_R4, etc.), and posts a Teams summary\nshowing total + error count per operation.\n\n**Setup (paste 2 values into Session + Filters):**\n- sessionJson \u2014 full contents of session.json\n- teamsWebhookUrl \u2014 your Teams webhook URL\n\n**Posts on every run** (even quiet ones). To post only when there's\nactivity, add an IF node after Build Teams Card checking the count.\n\n**Card is red** when any operation had errors, green when all ok.\n\n**Daily:** session.json expires (~a day) \u2014 re-run login.js and\nre-paste when runs fail with 'session expired'.",
+        "height": 420,
+        "width": 420
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000006",
+      "name": "Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -700,
+        -180
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c-has-tx",
+              "leftValue": "={{ $json.count }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "eaeaf001-0001-4001-8001-000000000007",
+      "name": "Any Transactions?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -150,
+        320
+      ]
+    }
+  ],
+  "connections": {
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Session + Filters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Session + Filters": {
+      "main": [
+        [
+          {
+            "node": "Fetch + Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch + Group": {
+      "main": [
+        [
+          {
+            "node": "Any Transactions?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Teams Card": {
+      "main": [
+        [
+          {
+            "node": "Post To Teams",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Transactions?": {
+      "main": [
+        [
+          {
+            "node": "Build Teams Card",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
